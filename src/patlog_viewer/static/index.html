@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patlog Viewer</title>
+<style>
+:root{--bg:#fbfbfd;--fg:#1d1d1f;--mut:#666;--acc:#0b5cad;--bd:#ddd}
+*{box-sizing:border-box}
+body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.5}
+main{max-width:1180px;margin:0 auto;padding:24px 28px 80px}
+h1{font-size:26px;margin:8px 0 4px}
+h1 .ver{font-size:14px;font-weight:400;color:var(--mut);margin-left:10px}
+h2{margin-top:28px;border-bottom:2px solid var(--acc);padding-bottom:4px;font-size:20px}
+.meta{color:var(--mut);font-size:13px}
+#langbtn{position:fixed;top:12px;right:16px;z-index:40;background:var(--acc);color:#fff;border:0;border-radius:16px;padding:6px 14px;cursor:pointer;font-size:14px}
+.dialog-back{position:fixed;inset:0;z-index:30;background:rgba(28,25,23,.38);display:flex;align-items:flex-start;justify-content:center;padding:56px 16px 24px}
+.dialog-back[hidden]{display:none}
+#progressDialog{z-index:50}
+.bar{height:8px;background:#e7e5e4;border-radius:99px;overflow:hidden;margin:14px 0 8px}
+.bar>div{height:100%;width:0;background:var(--acc)}
+#progressList{list-style:none;padding:0;margin:8px 0 0}
+#progressList li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--bd)}
+#progressList li.bad{color:#9f1239}
+.dialog{background:#fff;width:min(760px,100%);max-height:calc(100vh - 96px);overflow:auto;border-radius:12px;padding:18px 22px 16px;box-shadow:0 16px 48px rgba(0,0,0,.2)}
+.dialog h2{margin-top:4px}
+.dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+html[lang=zh] .en{display:none}
+html[lang=en] .zh{display:none}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:8px 0}
+th,td{border:1px solid var(--bd);padding:5px 8px;text-align:left;vertical-align:middle}
+td.ops{white-space:nowrap}
+th{background:#eef3f9}
+input,select,button{font:inherit;font-size:14px}
+input:not([type=checkbox]),select{background:#fff;color:inherit;border:1px solid var(--bd);border-radius:6px;padding:6px 10px;line-height:1.2}
+select{appearance:none;-webkit-appearance:none;padding-right:28px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.2L6 6.2 11 1.2' fill='none' stroke='%23666' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+button.act{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer;line-height:1.2}
+button.ghost{background:#fff;color:inherit;border:1px solid var(--bd);border-radius:6px;padding:6px 12px;cursor:pointer;line-height:1.2}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.err{color:#9f1239}
+#stats{white-space:pre-wrap}
+.legend{font-size:13px}
+.swatch{display:inline-block;width:14px;height:3px;margin:0 4px 2px 10px;vertical-align:middle}
+canvas{width:100%;background:#fff}
+tr.pick.on{background:#e8f1fb}
+</style>
+</head>
+<body>
+<button id="langbtn" type="button">English</button>
+<main>
+<h1>Patlog Viewer <span id="build" class="ver"></span></h1>
+<div class="row">
+<button class="ghost" id="openRobots" type="button"><span class="zh">机器人</span><span class="en">Robots</span></button>
+<button class="ghost" id="openFetch" type="button"><span class="zh">获取</span><span class="en">Fetch</span></button>
+<span id="setup" class="meta"><span class="zh"></span><span class="en"></span></span>
+</div>
+<p id="note" class="meta"></p>
+
+<div id="robotsDialog" class="dialog-back" hidden>
+<div class="dialog" role="dialog" aria-modal="true">
+<h2><span class="zh">机器人</span><span class="en">Robots</span></h2>
+<p class="meta"><span class="zh">只填 IP。名称从机器人读取；连不上时先保存，下次获取时再试。端口固定。</span><span class="en">Enter the IP only. The name is read from the robot. If it cannot be reached, the IP is kept and the name is tried again on the next fetch. The port is fixed.</span></p>
+<table id="robots">
+<tr><th><span class="zh">名称</span><span class="en">Name</span></th><th>IP</th><th></th></tr>
+</table>
+<div class="row">
+<button class="ghost" id="addRobot" type="button"><span class="zh">加一台</span><span class="en">Add</span></button>
+</div>
+<p id="robotsNote" class="meta err"></p>
+<div class="actions">
+<button class="ghost" id="closeRobots" type="button"><span class="zh">关闭</span><span class="en">Close</span></button>
+<button class="act" id="saveRobots" type="button"><span class="zh">保存列表</span><span class="en">Save list</span></button>
+</div>
+</div>
+</div>
+
+<div id="fetchDialog" class="dialog-back" hidden>
+<div class="dialog" role="dialog" aria-modal="true">
+<h2><span class="zh">获取</span><span class="en">Fetch</span></h2>
+<p class="meta"><span class="zh">定时或立即从机器人列表拉取，也可以解析本机已经下载的 patlog。开始后回到历史任务查看进度。</span><span class="en">Fetch on a schedule or now from the robot list, or parse patlogs already on this computer. Progress shows in the history list.</span></p>
+<div class="row">
+<label><input id="enabled" type="checkbox"> <span class="zh">定时</span><span class="en">Schedule</span></label>
+<label><span class="zh">方式</span><span class="en">Mode</span>
+<select id="scheduleMode">
+<option value="interval" data-zh="每隔" data-en="Every">每隔</option>
+<option value="daily" data-zh="每天" data-en="Daily">每天</option>
+<option value="hourly" data-zh="每小时" data-en="Hourly">每小时</option>
+</select>
+</label>
+<label id="intervalField"><span class="zh">间隔（分钟）</span><span class="en">Interval (minutes)</span> <input id="interval" type="number" min="10" value="60" style="width:80px"></label>
+<label id="hourField" hidden><span class="zh">时</span><span class="en">Hour</span> <input id="hour" type="number" min="0" max="23" value="8" style="width:64px"></label>
+<label id="minuteField" hidden><span class="zh">分</span><span class="en">Min</span> <input id="minute" type="number" min="0" max="59" value="0" style="width:64px"></label>
+<label><span class="zh">窗口</span><span class="en">Window</span>
+<select id="window">
+<option value="latest" data-zh="最近一个文件" data-en="Latest file" selected>最近一个文件</option>
+<option value="10m" data-zh="10 分钟" data-en="10 minutes">10 分钟</option>
+<option value="20m" data-zh="20 分钟" data-en="20 minutes">20 分钟</option>
+<option value="30m" data-zh="30 分钟" data-en="30 minutes">30 分钟</option>
+</select>
+</label>
+<button class="ghost" id="saveSchedule" type="button"><span class="zh">保存定时</span><span class="en">Save schedule</span></button>
+</div>
+<div class="row">
+<button class="act" id="fetchNow" type="button"><span class="zh">立即获取</span><span class="en">Fetch now</span></button>
+</div>
+<div class="row">
+<label><span class="zh">本机目录</span><span class="en">Local directory</span> <input id="localRoot" style="width:420px" placeholder="C:\path\to\patlogs"></label>
+<button class="act" id="parseLocal" type="button"><span class="zh">解析本机 patlog</span><span class="en">Parse local patlogs</span></button>
+</div>
+<p id="fetchNote" class="meta err"></p>
+<div class="actions">
+<button class="ghost" id="closeFetch" type="button"><span class="zh">关闭</span><span class="en">Close</span></button>
+</div>
+</div>
+</div>
+
+<div id="progressDialog" class="dialog-back" hidden>
+<div class="dialog" role="dialog" aria-modal="true">
+<h2><span class="zh" id="progressHeadingZh">任务进行中</span><span class="en" id="progressHeadingEn">Run in progress</span></h2>
+<p id="progressTitle" class="meta"></p>
+<div class="bar"><div id="progressFill"></div></div>
+<p id="progressCount" class="meta"><span class="zh"></span><span class="en"></span></p>
+<ul id="progressList"></ul>
+<p id="progressError" class="meta err"></p>
+<div class="actions">
+<button class="ghost" id="closeProgress" type="button" hidden><span class="zh">关闭</span><span class="en">Close</span></button>
+</div>
+</div>
+</div>
+
+<h2><span class="zh">历史任务</span><span class="en">History</span></h2>
+<p class="meta"><span class="zh">历史任务在这里。点某一行的「报告」，再看这次的 ax、ay、az。时间是日志文件名里的现场时间。</span><span class="en">History is listed here. Open a report to see that run’s ax, ay, and az. The clock is the time written in the log file name.</span></p>
+<table id="runs"><tr>
+<th><span class="zh">时间</span><span class="en">Time</span></th>
+<th>local / online</th>
+<th><span class="zh">触发</span><span class="en">Trigger</span></th>
+<th><span class="zh">状态</span><span class="en">Status</span></th>
+<th><span class="zh">机器人</span><span class="en">Robots</span></th>
+<th></th>
+</tr></table>
+</main>
+<script>
+let timer = null;
+
+function setLang(lang) {
+  document.documentElement.lang = lang;
+  localStorage.setItem("patlogViewerLang", lang);
+  document.getElementById("langbtn").textContent = lang === "zh" ? "English" : "中文";
+  document.querySelectorAll("#window option, #scheduleMode option").forEach(function (opt) {
+    opt.textContent = lang === "en" ? opt.dataset.en : opt.dataset.zh;
+  });
+}
+document.getElementById("langbtn").addEventListener("click", function () {
+  setLang(document.documentElement.lang === "zh" ? "en" : "zh");
+});
+setLang(localStorage.getItem("patlogViewerLang") || ((navigator.language || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en"));
+
+let savedRobots = [];
+let savedSchedule = { enabled: false, interval_minutes: 60, window: "latest", mode: "interval", hour: 8, minute: 0, next_run: null };
+
+function note(text, target) {
+  const el = document.getElementById(target || "note");
+  if (el) el.textContent = text || "";
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function scheduleWhen(schedule) {
+  const mode = schedule.mode || "interval";
+  const hour = pad2(schedule.hour);
+  const minute = pad2(schedule.minute);
+  if (mode === "daily") return ["每天 " + hour + ":" + minute, "daily at " + hour + ":" + minute];
+  if (mode === "hourly") return ["每小时 " + minute + " 分", "hourly at minute " + minute];
+  return ["每 " + schedule.interval_minutes + " 分钟", "every " + schedule.interval_minutes + " min"];
+}
+
+function nowText() {
+  const moment = new Date();
+  return moment.getFullYear() + "-" + pad2(moment.getMonth() + 1) + "-" + pad2(moment.getDate())
+    + " " + pad2(moment.getHours()) + ":" + pad2(moment.getMinutes()) + ":" + pad2(moment.getSeconds());
+}
+
+function upcomingRun(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/.exec(text || "");
+  if (!match) return "";
+  const planned = new Date(+match[1], match[2] - 1, +match[3], +match[4], +match[5], +(match[6] || 0));
+  if (planned.getTime() <= Date.now()) return "";
+  return text;
+}
+
+function syncScheduleFields() {
+  const mode = document.getElementById("scheduleMode").value;
+  document.getElementById("intervalField").hidden = mode !== "interval";
+  document.getElementById("hourField").hidden = mode !== "daily";
+  document.getElementById("minuteField").hidden = mode === "interval";
+}
+
+function renderSetup() {
+  const n = savedRobots.length;
+  const on = !!savedSchedule.enabled;
+  const windows = {
+    latest: ["最近一个文件", "latest file"],
+    "10m": ["10 分钟", "10 min"],
+    "20m": ["20 分钟", "20 min"],
+    "30m": ["30 分钟", "30 min"]
+  };
+  const winPair = windows[savedSchedule.window] || windows.latest;
+  const when = scheduleWhen(savedSchedule);
+  const clock = nowText();
+  const upcoming = on ? upcomingRun(savedSchedule.next_run) : "";
+  const next = "，现在 " + clock + (upcoming ? "，下次 " + upcoming : "");
+  const nextEn = ", now " + clock + (upcoming ? ", next " + upcoming : "");
+  document.querySelector("#setup .zh").textContent = n + " 台机器人 · 定时" + (on ? "开，" + when[0] + next + "，窗口 " + winPair[0] : "关" + next);
+  document.querySelector("#setup .en").textContent = n + " robots · schedule " + (on ? "on, " + when[1] + nextEn + ", window " + winPair[1] : "off" + nextEn);
+}
+
+function closeDialogs() {
+  document.querySelectorAll(".dialog-back").forEach(function (back) {
+    if (back.id !== "progressDialog") back.hidden = true;
+  });
+}
+
+function openDialog(id) {
+  closeDialogs();
+  note("");
+  document.getElementById(id).hidden = false;
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const type = res.headers.get("content-type") || "";
+  const body = type.indexOf("application/json") >= 0 ? await res.json() : await res.text();
+  if (!res.ok) {
+    const detail = body && body.detail ? body.detail : res.status;
+    throw new Error(detail);
+  }
+  return body;
+}
+
+function showRobotName(tr, id, host) {
+  const name = tr.querySelector(".rname");
+  const pending = !id || id === host;
+  tr.dataset.pending = pending && host ? "1" : "";
+  if (pending && host) {
+    name.innerHTML = '<span class="zh">未获取</span><span class="en">Not available</span>';
+  } else {
+    name.textContent = id || "";
+  }
+}
+
+function alreadyListed(label) {
+  return document.documentElement.lang === "en" ? label + " is already in the list" : label + " 已经在列表里";
+}
+
+function otherRobotRows(tr) {
+  return Array.from(document.querySelectorAll("#robots tr.item")).filter(function (row) { return row !== tr; });
+}
+
+function duplicateLabel(tr, host, name) {
+  const rows = otherRobotRows(tr);
+  if (host && rows.some(function (row) { return row.querySelector(".rhost").value.trim() === host; })) return host;
+  if (name && rows.some(function (row) {
+    return row.dataset.pending !== "1" && row.querySelector(".rname").textContent.trim() === name;
+  })) return name;
+  return "";
+}
+
+function rememberRobot(tr, id, host) {
+  showRobotName(tr, id, host);
+  tr.dataset.host = host;
+  tr.dataset.name = tr.dataset.pending === "1" ? "" : (id || "");
+}
+
+function rejectDuplicate(tr, label) {
+  const previous = tr.dataset.host || "";
+  note(alreadyListed(label), "robotsNote");
+  if (!previous) {
+    tr.remove();
+    return;
+  }
+  const previousName = tr.dataset.name || "";
+  tr.querySelector(".rhost").value = previous;
+  showRobotName(tr, previousName || previous, previous);
+}
+
+function robotRow(robot) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = '<td class="rname"></td><td><input class="rhost" value="" placeholder="10.11.87.23"></td><td><button type="button" class="ghost rm"><span class="zh">删除</span><span class="en">Remove</span></button></td>';
+  tr.querySelector(".rhost").value = robot.host || "";
+  rememberRobot(tr, robot.id || "", robot.host || "");
+  tr.querySelector(".rhost").addEventListener("change", function () { lookupRow(tr); });
+  tr.querySelector(".rm").addEventListener("click", function () { tr.remove(); });
+  return tr;
+}
+
+async function lookupRow(tr) {
+  const host = tr.querySelector(".rhost").value.trim();
+  const name = tr.querySelector(".rname");
+  if (!host) {
+    name.textContent = "";
+    tr.dataset.host = "";
+    tr.dataset.name = "";
+    tr.dataset.pending = "";
+    return true;
+  }
+  const sameIp = duplicateLabel(tr, host, "");
+  if (sameIp) {
+    rejectDuplicate(tr, sameIp);
+    return false;
+  }
+  name.textContent = "…";
+  let resolved = host;
+  let pending = true;
+  try {
+    const found = await api("/api/robots/lookup?host=" + encodeURIComponent(host));
+    if (tr.querySelector(".rhost").value.trim() !== host) return false;
+    pending = !!found.pending;
+    resolved = pending ? host : found.id;
+  } catch (err) {
+    if (tr.querySelector(".rhost").value.trim() !== host) return false;
+    pending = true;
+    resolved = host;
+  }
+  const sameName = duplicateLabel(tr, "", pending ? "" : resolved);
+  if (sameName) {
+    rejectDuplicate(tr, sameName);
+    return false;
+  }
+  rememberRobot(tr, pending ? host : resolved, host);
+  note("", "robotsNote");
+  return true;
+}
+
+function renderRobots(robots) {
+  const table = document.getElementById("robots");
+  table.querySelectorAll("tr.item").forEach(function (row) { row.remove(); });
+  (robots.length ? robots : [{ id: "", host: "", port: 19208 }]).forEach(function (robot) {
+    const row = robotRow(robot);
+    row.className = "item";
+    table.appendChild(row);
+  });
+}
+
+function readRobots() {
+  return Array.from(document.querySelectorAll("#robots tr.item")).map(function (row) {
+    return {
+      id: row.dataset.pending === "1" ? "" : row.querySelector(".rname").textContent.trim(),
+      host: row.querySelector(".rhost").value.trim()
+    };
+  }).filter(function (robot) { return robot.host; });
+}
+
+function runTime(run) {
+  return (run.created_at || "").replace("T", " ") || run.id;
+}
+
+function renderRuns(runs) {
+  const table = document.getElementById("runs");
+  table.querySelectorAll("tr.pick, tr.empty").forEach(function (row) { row.remove(); });
+  if (!runs.length) {
+    const empty = document.createElement("tr");
+    empty.className = "empty";
+    empty.innerHTML = '<td colspan="6"><span class="zh">还没有历史任务。用「获取」从机器人或本机目录导入。</span><span class="en">No history yet. Use Fetch to import from a robot or a local directory.</span></td>';
+    table.appendChild(empty);
+  }
+  runs.forEach(function (run) {
+    const tr = document.createElement("tr");
+    tr.className = "pick";
+    const robots = (run.robots || []).map(function (robot) { return robot.id; }).join(", ");
+    const source = run.source || (run.window_label === "local" ? "local" : "online");
+    tr.innerHTML = "<td></td><td></td><td></td><td></td><td></td><td></td>";
+    tr.children[0].textContent = runTime(run);
+    tr.children[1].textContent = source;
+    tr.children[2].textContent = run.trigger;
+    tr.children[3].textContent = run.status;
+    tr.children[4].textContent = robots;
+    function opsButton(zh, en, onClick) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost";
+      button.style.marginLeft = "6px";
+      button.innerHTML = '<span class="zh">' + zh + '</span><span class="en">' + en + '</span>';
+      button.addEventListener("click", onClick);
+      return button;
+    }
+    const btn = opsButton("报告", "Report", function (ev) {
+      ev.stopPropagation();
+      window.open("/api/runs/" + run.id + "/report", "_blank");
+    });
+    btn.style.marginLeft = "0";
+    const view = opsButton("查看", "View", async function (ev) {
+      ev.stopPropagation();
+      try {
+        const full = await api("/api/runs/" + run.id);
+        if (full.status === "running") {
+          await watch(full.id);
+          return;
+        }
+        renderProgress(full);
+      } catch (err) { note(err.message); }
+    });
+    const save = opsButton("导出", "Export", function (ev) {
+      ev.stopPropagation();
+      const link = document.createElement("a");
+      link.href = "/api/runs/" + encodeURIComponent(run.id) + "/export";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.style.marginLeft = "6px";
+    remove.innerHTML = '<span class="zh">删除</span><span class="en">Delete</span>';
+    remove.addEventListener("click", async function (ev) {
+      ev.stopPropagation();
+      const ask = document.documentElement.lang === "en" ? "Delete this history entry?" : "删除这条历史任务？";
+      if (!confirm(ask)) return;
+      try {
+        await api("/api/runs/" + run.id, { method: "DELETE" });
+        note("");
+        const latest = await api("/api/runs");
+        renderRuns(latest.runs);
+      } catch (err) { note(err.message); }
+    });
+    tr.children[5].className = "ops";
+    tr.children[5].appendChild(btn);
+    tr.children[5].appendChild(view);
+    tr.children[5].appendChild(save);
+    tr.children[5].appendChild(remove);
+    table.appendChild(tr);
+  });
+}
+
+const STATUS_TEXT = {
+  pending: ["等待", "Waiting"],
+  connecting: ["连接中", "Connecting"],
+  downloading: ["下载中", "Downloading"],
+  parsing: ["解析中", "Parsing"],
+  idle: ["未运动", "No motion"],
+  done: ["完成", "Done"],
+  failed: ["失败", "Failed"]
+};
+
+function sizeText(bytes) {
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+  if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
+  return bytes + " B";
+}
+
+function renderProgress(run) {
+  const dialog = document.getElementById("progressDialog");
+  if (!run) {
+    dialog.hidden = true;
+    return;
+  }
+  dialog.hidden = false;
+  const headings = {
+    running: ["任务进行中", "Run in progress"],
+    failed: ["任务失败", "Run failed"],
+    done: ["任务完成", "Run finished"]
+  };
+  const heading = headings[run.status] || headings.done;
+  document.getElementById("progressHeadingZh").textContent = heading[0];
+  document.getElementById("progressHeadingEn").textContent = heading[1];
+  document.getElementById("closeProgress").hidden = run.status === "running";
+  document.getElementById("progressError").textContent = run.status === "running" ? "" : (run.error || "");
+  document.getElementById("progressTitle").textContent = runTime(run);
+  const robots = run.robots || [];
+  const weight = { pending: 0, connecting: 0.05, downloading: 0.1, parsing: 0.8, done: 1, idle: 1, failed: 1 };
+  const sum = robots.reduce(function (acc, robot) {
+    if (robot.status === "downloading" && robot.total) {
+      return acc + 0.1 + 0.7 * Math.min(1, (robot.received || 0) / robot.total);
+    }
+    return acc + (weight[robot.status] || 0);
+  }, 0);
+  const pct = robots.length ? Math.round(sum / robots.length * 100) : 0;
+  document.getElementById("progressFill").style.width = pct + "%";
+  const finished = robots.filter(function (robot) {
+    return robot.status === "done" || robot.status === "idle" || robot.status === "failed";
+  }).length;
+  document.querySelector("#progressCount .zh").textContent = "已完成 " + finished + " / " + robots.length;
+  document.querySelector("#progressCount .en").textContent = finished + " / " + robots.length + " finished";
+  const list = document.getElementById("progressList");
+  list.innerHTML = "";
+  robots.forEach(function (robot) {
+    const pair = STATUS_TEXT[robot.status] || [robot.status, robot.status];
+    const li = document.createElement("li");
+    if (robot.status === "failed") li.className = "bad";
+    let extra = robot.error ? " · " + robot.error : "";
+    if (robot.status === "downloading" && robot.total) extra = " · " + sizeText(robot.received || 0) + " / " + sizeText(robot.total);
+    li.innerHTML = '<span></span><span><span class="zh"></span><span class="en"></span></span>';
+    li.children[0].textContent = robot.id;
+    li.querySelector(".zh").textContent = pair[0] + extra;
+    li.querySelector(".en").textContent = pair[1] + extra;
+    list.appendChild(li);
+  });
+}
+
+async function watch(id) {
+  if (timer) clearInterval(timer);
+  async function tick() {
+    const run = await api("/api/runs/" + id);
+    const runs = await api("/api/runs");
+    renderRuns(runs.runs);
+    renderProgress(run);
+    if (run.status !== "running") {
+      clearInterval(timer);
+      timer = null;
+      if (run.trigger === "schedule") document.getElementById("progressDialog").hidden = true;
+      if (run.error) note(run.error);
+    }
+  }
+  await tick();
+  timer = setInterval(tick, 1000);
+}
+
+let schedulePoll = false;
+setInterval(async function () {
+  if (!schedulePoll) {
+    schedulePoll = true;
+    try {
+      savedSchedule = await api("/api/schedule");
+      renderSetup();
+    } catch (err) {}
+    schedulePoll = false;
+  }
+  if (timer) return;
+  try {
+    const runs = await api("/api/runs");
+    const active = (runs.runs || []).find(function (run) { return run.status === "running"; });
+    if (active) watch(active.id);
+  } catch (err) {}
+}, 1000);
+
+document.getElementById("openRobots").addEventListener("click", function () { openDialog("robotsDialog"); });
+document.getElementById("openFetch").addEventListener("click", function () { openDialog("fetchDialog"); });
+document.getElementById("closeRobots").addEventListener("click", closeDialogs);
+document.getElementById("closeFetch").addEventListener("click", closeDialogs);
+document.querySelectorAll(".dialog-back").forEach(function (back) {
+  if (back.id === "progressDialog") return;
+  back.addEventListener("click", function (ev) { if (ev.target === back) closeDialogs(); });
+});
+document.getElementById("closeProgress").addEventListener("click", function () {
+  document.getElementById("progressDialog").hidden = true;
+});
+document.getElementById("progressDialog").addEventListener("click", function (ev) {
+  if (ev.target === this && !document.getElementById("closeProgress").hidden) this.hidden = true;
+});
+document.addEventListener("keydown", function (ev) {
+  if (ev.key !== "Escape") return;
+  const progress = document.getElementById("progressDialog");
+  if (!progress.hidden && !document.getElementById("closeProgress").hidden) {
+    progress.hidden = true;
+    return;
+  }
+  if (progress.hidden) closeDialogs();
+});
+document.getElementById("addRobot").addEventListener("click", function () {
+  const row = robotRow({ id: "", host: "", port: 19208 });
+  row.className = "item";
+  document.getElementById("robots").appendChild(row);
+});
+document.getElementById("saveRobots").addEventListener("click", async function () {
+  try {
+    const rows = Array.from(document.querySelectorAll("#robots tr.item"));
+    for (const row of rows) {
+      const host = row.querySelector(".rhost").value.trim();
+      const name = row.querySelector(".rname").textContent.trim();
+      if (host && (row.dataset.host !== host || !name || name === "…")) {
+        const ok = await lookupRow(row);
+        if (!ok) return;
+      }
+    }
+    const robots = readRobots();
+    const saved = await api("/api/robots", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(robots) });
+    savedRobots = saved.robots || [];
+    renderRobots(savedRobots);
+    renderSetup();
+    note("", "robotsNote");
+    closeDialogs();
+  } catch (err) { note(err.message, "robotsNote"); }
+});
+document.getElementById("scheduleMode").addEventListener("change", syncScheduleFields);
+document.getElementById("saveSchedule").addEventListener("click", async function () {
+  try {
+    const minutes = Number(document.getElementById("interval").value);
+    if (document.getElementById("scheduleMode").value === "interval" && !(minutes >= 10)) {
+      const lang = document.documentElement.lang;
+      note(lang === "en" ? "Interval must be at least 10 minutes" : "间隔不能小于 10 分钟", "fetchNote");
+      return;
+    }
+    const saved = await api("/api/schedule", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: document.getElementById("enabled").checked,
+        interval_minutes: minutes || 60,
+        window: document.getElementById("window").value.trim(),
+        mode: document.getElementById("scheduleMode").value,
+        hour: Number(document.getElementById("hour").value),
+        minute: Number(document.getElementById("minute").value)
+      })
+    });
+    savedSchedule = saved;
+    renderSetup();
+    note("", "fetchNote");
+  } catch (err) { note(err.message, "fetchNote"); }
+});
+document.getElementById("fetchNow").addEventListener("click", async function () {
+  try {
+    const run = await api("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window: document.getElementById("window").value.trim() })
+    });
+    closeDialogs();
+    note("");
+    await watch(run.id);
+  } catch (err) { note(err.message, "fetchNote"); }
+});
+document.getElementById("parseLocal").addEventListener("click", async function () {
+  try {
+    const run = await api("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ local_root: document.getElementById("localRoot").value.trim() })
+    });
+    closeDialogs();
+    note("");
+    await watch(run.id);
+  } catch (err) { note(err.message, "fetchNote"); }
+});
+
+(async function () {
+  const build = await api("/api/version", { cache: "no-store" });
+  const stamp = document.getElementById("build");
+  stamp.innerHTML = '<span class="zh"></span><span class="en"></span>';
+  stamp.querySelector(".zh").textContent = build.version + " · 构建 " + build.built_at;
+  stamp.querySelector(".en").textContent = build.version + " · built " + build.built_at;
+  const robots = await api("/api/robots");
+  savedRobots = robots.robots || [];
+  renderRobots(savedRobots);
+  const schedule = await api("/api/schedule");
+  savedSchedule = schedule;
+  document.getElementById("enabled").checked = !!schedule.enabled;
+  document.getElementById("interval").value = schedule.interval_minutes;
+  document.getElementById("scheduleMode").value = schedule.mode || "interval";
+  document.getElementById("hour").value = schedule.hour == null ? 8 : schedule.hour;
+  document.getElementById("minute").value = schedule.minute == null ? 0 : schedule.minute;
+  syncScheduleFields();
+  const choices = ["latest", "10m", "20m", "30m"];
+  document.getElementById("window").value = choices.indexOf(schedule.window) >= 0 ? schedule.window : "latest";
+  renderSetup();
+  setInterval(renderSetup, 1000);
+  const runs = await api("/api/runs");
+  renderRuns(runs.runs);
+  const active = (runs.runs || []).find(function (run) { return run.status === "running"; });
+  if (active) watch(active.id);
+})();
+</script>
+</body>
+</html>
